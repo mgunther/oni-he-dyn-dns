@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# ------------------------------------------------------------------
+# HE Dynamic DNS Updater
+# Powered by ONI-Net
+#
+DASH10="----------"
+DASH30="------------------------------"
+
+HE_CONF=../etc/oni-hedyndns.conf			# HE DDNS config file
+HE_HOST=https://dyn.dns.he.net/nic/update	# HE DDNS API URL
+HE_TOUT=10									# Timeout for curl
+
+dns_upd() {
+	local HE_PROT=${1}
+	local HE_NAME=${2}
+	local HE_PASS=${3}
+
+	# Using POST through the HE dynamic DNS API
+	local OUT=$(curl -s -k \
+		-"${HE_PROT}" \
+		-m "${HE_TOUT}" \
+		${HE_HOST} \
+		-d "hostname=${HE_NAME}" \
+		-d "password=${HE_PASS}" \
+		2>&1)
+
+	# ${OUT} will be empty on timeout, so we catch curl's return code for timeout
+	# and populate ${OUT} with a helpful message.
+	# Could do this for other common errors from curl too.
+	local RC=$?
+	if [ "${RC}" == 28 ]; then
+		OUT="timeout none"
+	fi
+
+	case ${OUT} in
+		*good*)
+			logger -p local0.info   -t HE-DNS "OK: IPv${HE_PROT} address updated: ${HE_NAME} ${OUT}"
+			;;
+		*nochg*)
+			logger -p local0.notice -t HE-DNS "OK: IPv${HE_PROT} address no change: ${HE_NAME} ${OUT}"
+			;;
+		*)
+			logger -p local0.err    -t HE-DNS "ERROR: IPv${HE_PROT} address not updated : ${HE_NAME} ${OUT}"
+			;;
+	esac
+
+	set - ${OUT}
+	echo "IPv${HE_PROT} ${1} ${HE_NAME} ${2}"
+}
+
+# Read config file
+if [ -f ${HE_CONF} ]
+then
+	CONFIG=$(grep ^\[46\] ${HE_CONF})
+	# echo "${CONFIG}"
+else
+	echo "Config file not found: ${HE_CONF}"
+	logger -p local0.err -t HE-DNS "ERROR: Config file not found: ${HE_CONF}"
+	exit 1
+fi
+
+LIST=""
+
+for LINE in `echo ${CONFIG}`
+do
+	HE_PROT=$(echo ${LINE} | cut -d";" -f1)
+	HE_NAME=$(echo ${LINE} | cut -d";" -f2)
+	HE_PASS=$(echo ${LINE} | cut -d";" -f3)
+	LIST=$(dns_upd ${HE_PROT} ${HE_NAME} ${HE_PASS})
+
+	if [ -t 1 ]
+	then
+		# printf "\n%s" "Huricane Electric Dynamic DNS Updater"
+		# printf "\n%s\n" "Powered by ONI-Net"
+		# printf "%s\n" ${DASH30}${DASH30}
+		printf "%s %s %s (%s)\n" ${LIST}
+		# printf "%s\n" ${DASH30}${DASH30}
+	fi
+done
